@@ -2,7 +2,7 @@ import express from "express";
 
 import dotenv from "dotenv";
 import authRoute from "./routes/authRoute.js";
-import taskRoute from "./routes/task.js";
+import taskRoute from "./routes/taskRoute.js";
 
 
 const app= express();

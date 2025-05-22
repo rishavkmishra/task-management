@@ -1,47 +1,41 @@
 import pool from "../db/index.js";
-// export const createTask = async (req, res) => {
-//     const { title, description } = req.body;
-//     const userId = req.user.userId;
-
-//     if (!title) {
-//         return res.status(400).json({ message: "title is required" })
-//     }
-
-//     try {
-//         await pool.query(`INSERT INTO tasks(user_id, title, description, is_completed, created_at) VALUES($1,$2,$3, false, NOW())`,
-
-//             [userId, title, description]);
-//         res.status(201).json({ message: "Task created" })
-//     } catch (error) {
-//         res.status(500).json({ message: "server error" })
-
-//     }
-// }
+import { createTaksSchema, taskListReqeuest } from "../zod/task.js"
 
 
-    export const createTask = async (req, res) => {
-  try {
-    const { title, description } = req.body;
-    const userId = req.user?.userId; 
 
-    if (!userId) {
-      return res.status(401).json({ error: "User not authenticated" });
+
+export const createTask = async (req, res) => {
+    try {
+        console.log("req.body===>", req.body)
+        const { success = false, error = null, data } = createTaksSchema.safeParse(req.body);
+        console.log("success=====>", data)
+        console.log("error=====>", data)
+        if (!success) {
+            console.log("error==>", error)
+            return res.status(400).json({ error: "Invalid request body" });
+        }
+        //const { title, description } = data;
+        const { title, description } = data;
+        const userId = req.user?.id;
+
+        if (!userId) {
+            return res.status(401).json({ error: "User not authenticated" });
+        }
+
+        if (!title) {
+            return res.status(400).json({ error: "Title is required" });
+        }
+
+        const result = await pool.query(
+            "INSERT INTO tasks (title, description, user_id) VALUES ($1, $2, $3) RETURNING *",
+            [title, description, userId]
+        );
+
+        res.status(201).json({ task: result.rows[0] });
+    } catch (error) {
+        console.error("Create Task Error:", error);
+        res.status(500).json({ message: "server error", error: error.message });
     }
-
-    if (!title) {
-      return res.status(400).json({ error: "Title is required" });
-    }
-
-    const result = await pool.query(
-      "INSERT INTO tasks (title, description, user_id) VALUES ($1, $2, $3) RETURNING *",
-      [title, description, userId]
-    );
-
-    res.status(201).json({ task: result.rows[0] });
-  } catch (error) {
-    console.error("Create Task Error:", error);
-    res.status(500).json({ message: "server error", error: error.message });
-  }
 };
 
 export const searchTask = async (req, res) => {
@@ -49,7 +43,7 @@ export const searchTask = async (req, res) => {
     const keyword = req.query.q;
 
     if (!keyword) {
-        return res.status(400).json({ message: "query parameter is required" })
+        return res.status(400).json({ message: "query parameter q is required" })
     }
     try {
         const result = await pool.query(`
@@ -67,56 +61,51 @@ export const searchTask = async (req, res) => {
     }
 }
 
-/*
-export const getPaginatedTask = async (req, res) => {
-    const userId = req.user.userId;
-    const page = parseInt(req.query.page);
-    const limit = parseInt(req.query.limit);
-    const search = req.qurey.search;
-    const offset = (page - 1) * limit;
 
-    try {
-        const result = await pool.query(`SELECT * FROM tasks WHERE user_id = $1 AND (title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%') ORDER BY created_at DESC LIMIT $2 OFFSET $3`,
-            [userId, limit, offset, search]);
-        
-        const meta = {
-            currentPage: page,
-            limit,
-            totalDocs
-            
-        }
-        res.json(result.rows, )
-    } catch (error) {
-        res.status(500).json({ message: "server not found" })
-
-    }
-}
-*/
 
 export const getTasks = async (req, res) => {
-    const userId = req.user.userId;
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const search = (req.query.search);
+   const result = taskListReqeuest.safeParse(req.query);
+    const { page, limit, search } = result.data;
+    const userId = req.user.id;
+    // const page = parseInt(req.query.page);
+    // const limit = parseInt(req.query.limit);
+    // const search = req.query?.search;
     const offset = (page - 1) * limit;
+    console.log("userId",userId)
+
 
     try {
-        const countResult = await pool.query(`
-            SELECT COUNT(*) FROM tasks 
-            WHERE user_id = $1 
-            AND (title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%')
-        `, [userId, search]);
+        let query = `SELECT COUNT(*) FROM tasks 
+            WHERE user_id = $1`
+        let params = [userId];
+
+        if (search) {
+            query += ` AND (title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%')`
+            params.push(search);
+
+        }
+
+
+        const countResult = await pool.query(query, params);
 
         const totalDocs = parseInt(countResult.rows[0].count);
+        console.log({ totalDocs })
 
-        const result = await pool.query(`
-            SELECT * FROM tasks 
-            WHERE user_id = $1 
-            AND (title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%') 
-            ORDER BY created_at DESC 
-            LIMIT $3 OFFSET $4
-        `, [userId, search, limit, offset]);
+        let params1 = [userId];
 
+        let q1 = `SELECT * FROM tasks WHERE user_id = $1 `
+
+        if (search) {
+            q1 += ` AND (title ILIKE '%' || $2 || '%' OR description ILIKE '%' || $2 || '%')`
+            params1.push(search);
+        }
+        q1 += ` ORDER BY created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
+        params1.push(limit, offset)
+
+        console.log("q1", q1)
+        const result = await pool.query(q1, params1);
+
+        // console.log("result==>", result);
         const meta = {
             currentPage: page,
             limit: limit,
@@ -135,6 +124,7 @@ export const markTaskDone = async (req, res) => {
     const userId = req.user.userId;
     const taskId = parseInt(req.params.id);
     try {
+        // const result = Task.findByIdAndUpdate(id, req.body)
         const taskResult = await pool.query(
             'SELECT * FROM tasks WHERE id = $1 AND user_id = $2',
             [taskId, userId]
